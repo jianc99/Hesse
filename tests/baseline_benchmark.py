@@ -18,7 +18,7 @@ parser.add_argument('--model', type=str, default="meta-llama/Llama-2-7b-hf", hel
 parser.add_argument('--B', type=int, default=1, help='Batch size.')
 parser.add_argument('--M', type=int, default=256, help='Maximum length.')
 parser.add_argument('--seed', type=int, default=123, help='Random seed.')
-parser.add_argument('--dataset', type=str, default="/dataset/c4_small.json", help='dataset path')
+parser.add_argument('--dataset', type=str, default="cnn", help='dataset path')
 parser.add_argument('--start', type=int, default=0, help='Dataset start index.')
 parser.add_argument('--end', type=int, default=200, help='Dataset end index.')
 parser.add_argument('--top_p', type=float, default=0.9, help='Target sample top_p.')
