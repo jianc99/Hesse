@@ -92,5 +92,5 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     engine.llm.kv_cache.clear()
     if global_rank == 0:
         print(total_time/model_steps)
-    for i in range(BATCH_SIZE):
-        print(tokenizer.decode(output[i]))
+        for i in range(BATCH_SIZE):
+            print(tokenizer.decode(output[i]))
