@@ -68,7 +68,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     prefix_storage_ids = torch.arange(prefix_len, device=DEVICE)
     logits = engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., :prefix_len,:], storage_ids=prefix_storage_ids)
     seq_offset=prefix_len
-    logits = get_sampling_logits(logits=logits[:,-1], top_p=args.top_p, T=args.temperature, replicate=False)
+    logits = get_sampling_logits(logits=logits[:,-1].clone(), top_p=args.top_p, T=args.temperature, replicate=False)
     logits = softmax(logits / args.temperature, dim=-1)
     next_tokens = logits.view(-1, 32000).multinomial(num_samples=1).view(BATCH_SIZE, 1)
     output = torch.cat((output, next_tokens),dim=-1)
@@ -79,7 +79,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         position_ids = torch.full((BATCH_SIZE,1),seq_offset, device=DEVICE)
         storage_ids = torch.tensor(seq_offset, device=DEVICE)
         logits = engine.forward(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask[..., seq_offset,:], storage_ids=storage_ids)
-        logits = get_sampling_logits(logits=logits[:,-1], top_p=args.top_p, T=args.temperature, replicate=False)
+        logits = get_sampling_logits(logits=logits[:,-1].clone(), top_p=args.top_p, T=args.temperature, replicate=False)
         logits = softmax(logits / args.temperature, dim=-1)
         next_tokens = logits.view(-1, 32000).multinomial(num_samples=1).view(BATCH_SIZE, 1)
         output = torch.cat((output, next_tokens),dim=-1)
