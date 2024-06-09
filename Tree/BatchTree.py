@@ -2,12 +2,12 @@ import torch
 from torch.nn.functional import softmax
 from .Tree import BatchTree
 import time
-from Hesse.Engine.pipleline import LLM_Pipeline
+from Hesse.Engine.llm_pipe import LLMEngine
 from .utils import get_sampling_logits, ChildrenAccept
 class BatchSTree(BatchTree):
     def __init__(self, 
-                 draft_model_engine: LLM_Pipeline,
-                 target_model_engine: LLM_Pipeline,
+                 draft_model_engine: LLMEngine,
+                 target_model_engine: LLMEngine,
                  prefix :torch.LongTensor,
                  temperature :float = 0.6,
                  top_p: float = 0.9,
@@ -183,8 +183,8 @@ class BatchSTree(BatchTree):
                 accept_list = batch_accept_list[batch_idx]
                 accept_list_kv = batch_accept_list_kv[batch_idx]
                 accept_length = len(accept_list)
-                self.draft_model_engine.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
-                self.target_model_engine.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
+                self.draft_model_engine.llm.kv_cache.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
+                self.target_model_engine.llm.kv_cache.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
 
         if not terminal:
             if benchmark:
@@ -255,8 +255,8 @@ class BatchSTree(BatchTree):
 
 class BatchSTreeTest(BatchTree):
     def __init__(self, 
-                 draft_model_engine: LLM_Pipeline,
-                 target_model_engine: LLM_Pipeline,
+                 draft_model_engine: LLMEngine,
+                 target_model_engine: LLMEngine,
                  prefix :torch.LongTensor,
                  temperature :float = 0.6,
                  top_p: float = 0.9,
@@ -435,8 +435,8 @@ class BatchSTreeTest(BatchTree):
                 accept_list = batch_accept_list[batch_idx]
                 accept_list_kv = batch_accept_list_kv[batch_idx]
                 accept_length = len(accept_list)
-                self.draft_model_engine.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
-                self.target_model_engine.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
+                self.draft_model_engine.llm.kv_cache.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
+                self.target_model_engine.llm.kv_cache.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
 
         if not terminal:
             if benchmark:

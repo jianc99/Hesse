@@ -8,7 +8,7 @@ from transformers import DataCollatorForLanguageModeling, AutoTokenizer
 from Hesse.Tree.BatchTree import BatchSTreeTest
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
-from Hesse.Engine.pipleline import LLM_Pipeline
+from Hesse.Engine.llm_pipe import LLMEngine
 from Hesse.Data.data_converter import convert_wiki_dataset, convert_cnn_dataset, convert_c4_dataset
 from Hesse.Tree.utils import cuda_graph_for_sampling_argmax
 from Hesse.Engine.utils import setup_seed, initialized_dist_spec
@@ -26,22 +26,17 @@ parser.add_argument('--W', type=int, default=32, help='max width')
 parser.add_argument('--seed', type=int, default=123, help='random seed')
 parser.add_argument('--dst', type=str, default="btree_acc.pt", help='destination for accepetance rate vector')
 # Target model information
-parser.add_argument('--target_layer_partition', nargs='+', type=int, help='Layer partitioning as a list of integers.')
-parser.add_argument('--target_tp_groups', nargs='+', type=int, help='TP groups as a list of integers.')
 parser.add_argument('--target_group', nargs='+', type=int, help='Target group of ranks')
 # Draft model information
-parser.add_argument('--draft_layer_partition', nargs='+', type=int, help='Layer partitioning as a list of integers.')
-parser.add_argument('--draft_tp_groups', nargs='+', type=int, help='TP groups as a list of integers.')
 parser.add_argument('--draft_group', nargs='+', type=int, help='Target group of ranks')
-
 args = parser.parse_args()
 # print(args)
 setup_seed(args.seed)
-target_pp_config, draft_pp_config, target_last_stage_rank0, draft_last_stage_rank0 = initialized_dist_spec(args)
+target_global_group, draft_global_group = initialized_dist_spec(args)
 global_rank=dist.get_rank()
 BATCH_SIZE = 1
 
-def simulation_fast(target_model : LLM_Pipeline, draft_model: LLM_Pipeline, dataloader: DataLoader, T=0.6, top_p=0.9, 
+def simulation_fast(target_model : LLMEngine, draft_model: LLMEngine, dataloader: DataLoader, T=0.6, top_p=0.9, 
             max_length=512, grow_map=None, sampling_callables = None,
             sample_gather_indices = None, max_width=32):
     num_eval_steps = len(dataloader)
@@ -70,8 +65,8 @@ def simulation_fast(target_model : LLM_Pipeline, draft_model: LLM_Pipeline, data
                     accept_list[accept_pos]+=1
                 else:
                     accept_list[0]+=1
-            draft_model.clear_kv()
-            target_model.clear_kv()
+            draft_model.llm.kv_cache.clear()
+            target_model.llm.kv_cache.clear()
             num_decoding_steps += (num_nodes.sum() - input_ids.shape[1]*BATCH_SIZE)
             if dist.get_rank() == 0:
                 for i in range(BATCH_SIZE):
@@ -148,8 +143,10 @@ cg_list_target = [tree_size]
 cg_list_draft = [sum(x) for x in branch_lists]
 cg_list_draft.append(1)
 
-draft_model =  LLM_Pipeline(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, batch_size=BATCH_SIZE, dtype=torch.float16, pp_config=draft_pp_config, type="spec", last_stage_rank_0=draft_last_stage_rank0, cg_list=cg_list_draft)
-target_model = LLM_Pipeline(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, batch_size=BATCH_SIZE, dtype=torch.float16, pp_config=target_pp_config, type="spec", last_stage_rank_0=target_last_stage_rank0, cg_list=cg_list_target)
+draft_model =  LLMEngine(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, batch_size=BATCH_SIZE, dtype=torch.float16, global_group=draft_global_group)
+draft_model.initialize_cuda_graph(cg_list_draft)
+target_model = LLMEngine(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, batch_size=BATCH_SIZE, dtype=torch.float16, global_group=target_global_group)
+target_model.initialize_cuda_graph(cg_list_target)
 
 simulation_fast(target_model=target_model, draft_model=draft_model, dataloader=dataloader, T=args.T, top_p=args.P,
                                     max_length=MAX_LEN, grow_map = grow_map, sampling_callables=sampling_callables, sample_gather_indices = sample_gather_indices, max_width=args.W)

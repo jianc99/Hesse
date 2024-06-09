@@ -597,6 +597,7 @@ class LLMEngine:
                 dtype = torch.float16) -> None:
         
         self.llm = LLM(model_name, global_group, batch_size, max_length, device, dtype)
+        self.max_length = max_length
         self.callables = {}
         self.mempool = None
 

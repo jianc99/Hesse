@@ -24,38 +24,6 @@ def make_causal_mask(
     mask = mask.to(dtype)
     return mask
 
-def args_parse_spec():
-    parser = argparse.ArgumentParser(description='Process model configuration and partitions.')
-    
-    parser.add_argument('--target_model', type=str, default="meta-llama/Llama-2-70b-hf", help='Model identifier.')
-    parser.add_argument('--draft_model', type=str, default="meta-llama/Llama-2-7b-hf", help='Model identifier.')
-    parser.add_argument('--T', type=int, default=2000, help='Repeat times.')
-    parser.add_argument('--B', type=int, default=1, help='Batch size.')
-    parser.add_argument('--P', type=int, default=128, help='Prefix length.')
-    parser.add_argument('--M', type=int, default=512, help='Maximum length.')
-    parser.add_argument('--D', type=int, default=1, help='Decrement length.')
-    parser.add_argument('--seed', type=int, default=123, help='Random seed.')
-    parser.add_argument('--dataset', type=str, default="/dataset/c4_small.json", help='dataset path')
-    parser.add_argument('--start', type=int, default=0, help='Dataset start index.')
-    parser.add_argument('--end', type=int, default=200, help='Dataset end index.')
-    # Sample parameters
-    parser.add_argument('--top_k', type=int, default=20, help='Target samlple top_k')
-    parser.add_argument('--top_p', type=float, default=0.9, help='Target sample top_p.')
-    parser.add_argument('--temperature', type=float, default=0.6, help='Target sample temperature.')
-    # Target model information
-    parser.add_argument('--target_layer_partition', nargs='+', type=int, help='Layer partitioning as a list of integers.')
-    parser.add_argument('--target_tp_groups', nargs='+', type=int, help='TP groups as a list of integers.')
-    parser.add_argument('--target_group', nargs='+', type=int, help='Target group of ranks')
-    # Draft model information
-    parser.add_argument('--draft_layer_partition', nargs='+', type=int, help='Layer partitioning as a list of integers.')
-    parser.add_argument('--draft_tp_groups', nargs='+', type=int, help='TP groups as a list of integers.')
-    parser.add_argument('--draft_group', nargs='+', type=int, help='Target group of ranks')
-    # Speculative decoding parameters
-    parser.add_argument('--depth', type=int, default=1, help='Draft speculation length')
-    args = parser.parse_args()
-    
-    return args
-
 def gen_tp_rank_groups(tp_groups,rank_list):
     tp_rank_groups = []
     current_tp_rank = 0
