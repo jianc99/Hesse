@@ -65,6 +65,9 @@ def initialized_dist_spec(args):
 
     target_commgroup=dist.new_group(target_group)
     draft_commgroup=dist.new_group(draft_group)
+    warmup_tensor = torch.tensor([1]).cuda(global_rank)
+    dist.all_reduce(tensor=warmup_tensor, group=target_commgroup)
+    dist.all_reduce(tensor=warmup_tensor, group=draft_commgroup)
     return target_commgroup, draft_commgroup
 
 
@@ -74,6 +77,8 @@ def initialized_dist_baseline():
     # torch.cuda.set_device(0)
     torch.cuda.set_device(global_rank)
     global_group = dist.new_group(list(range(dist.get_world_size())))
+    warmup_tensor = torch.tensor([1]).cuda(global_rank)
+    dist.all_reduce(tensor=warmup_tensor, group=global_group)
     return global_group
 
 if __name__ == "__main__":
