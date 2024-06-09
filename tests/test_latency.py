@@ -1,3 +1,5 @@
+import sys
+sys.path.append("..")
 from Hesse.Engine.llm_pipe import LLMEngine
 from Hesse.Engine.utils import initialized_dist_baseline, make_causal_mask, setup_seed
 import argparse
@@ -7,7 +9,7 @@ import torch.distributed as dist
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, default="meta-llama/Llama-2-7b-hf",help='model')
-parser.add_argument('--T', type=int, default=100, help='repeat times')
+parser.add_argument('--T', type=int, default=500, help='repeat times')
 parser.add_argument('--B', type=int, default=1, help='batch size')
 parser.add_argument('--P', type=int, default=128, help='prefix length')
 parser.add_argument('--M', type=int, default=288, help='max length')
@@ -29,7 +31,7 @@ T = args.T
 WARM_UP = 10
 
 llm = LLMEngine(max_length=MAX_LEN, model_name=args.model, device=DEVICE, batch_size=BATCH_SIZE, global_group=global_group, dtype=DTYPE)
-llm.initialize_cuda_graph([DEC_LEN, PREFIX_LEN])
+llm.initialize_cuda_graph([DEC_LEN])
 
 input_ids = torch.randint(low=3, high=30000, size=(BATCH_SIZE, PREFIX_LEN), device=DEVICE)
 attention_mask = make_causal_mask((MAX_LEN, MAX_LEN), dtype=DTYPE, device=DEVICE)

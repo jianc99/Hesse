@@ -39,7 +39,7 @@ DEVICE = torch.device("cuda", global_rank)
 BATCH_SIZE = args.B
 
 engine = LLMEngine(max_length=MAX_LEN, model_name=MODEL_NAME, device=DEVICE, global_group=global_group, dtype=DTYPE, batch_size= BATCH_SIZE)
-engine.initialize_cuda_graph([1,128])
+engine.initialize_cuda_graph([1])
 
 tokenizer = LlamaTokenizer.from_pretrained(MODEL_NAME)
 tokenizer.pad_token = tokenizer.eos_token

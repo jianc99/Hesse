@@ -8,6 +8,8 @@ from torch import nn
 from typing import List, Optional, Tuple, Union
 import gc
 import torch.distributed as dist
+from itertools import accumulate
+
 def _make_causal_mask(
     input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device
 ):
@@ -20,6 +22,24 @@ def _make_causal_mask(
     mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
     mask = mask.to(dtype)
     return mask
+
+def select_kv_heads(num_kv_heads, global_group):
+    world_size = dist.get_world_size(global_group)
+    rank = dist.get_rank(global_group)
+    base_heads = num_kv_heads // world_size
+    remainder = num_kv_heads % world_size
+    distribution = [base_heads] * world_size
+    for i in range(remainder):
+        distribution[i] += 1
+    cumulative_distribution = list(accumulate(distribution))
+    if rank == 0:
+        start = 0
+        end = cumulative_distribution[0]
+    else:
+        start = cumulative_distribution[rank-1]
+        end = cumulative_distribution[rank]
+    return start, end
+
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
@@ -138,24 +158,25 @@ class KV_Cache:
         self.dtype = dtype
         self.world_size = dist.get_world_size(self.process_group)
         self.rank = dist.get_rank(self.process_group)
+        start, end = select_kv_heads(config.num_key_value_heads, self.process_group)
 
         self.k_cache = torch.zeros(
             config.num_hidden_layers,
             batch_size,
-            config.num_key_value_heads,
+            end-start,
             max_length,
             config.hidden_size // config.num_attention_heads,
             dtype=self.dtype
-        ).chunk(self.world_size,2)[self.rank].to(self.device)
+        ).to(self.device)
 
         self.v_cache = torch.zeros(
             config.num_hidden_layers,
             batch_size,
-            config.num_key_value_heads,
+            end-start,
             max_length,
             config.hidden_size // config.num_attention_heads,
             dtype=self.dtype
-        ).chunk(self.world_size,2)[self.rank].to(self.device)
+        ).to(self.device)
         self.kv_offset = 0
 
     def initialize_kv(self,
@@ -270,9 +291,10 @@ class LLMLayer:
         self.num_key_value_heads = config.num_key_value_heads
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
 
-        self.kv_slice = torch.arange(self.num_key_value_heads).chunk(self.world_size)[self.rank]
-        self.kv_start = (self.kv_slice[0])*self.head_dim
-        self.kv_end = (self.kv_slice[-1]+1)*self.head_dim
+
+        start, end = select_kv_heads(self.num_key_value_heads, global_group)
+        self.kv_start = start*self.head_dim
+        self.kv_end = end*self.head_dim
 
         self.intermediate_size = config.intermediate_size
         self.mlp_slice = self.intermediate_size // self.world_size
