@@ -113,19 +113,19 @@ def simulation_fast(draft_model: LLMEngine, dataloader: DataLoader, max_length=5
 
 if global_rank in args.target_group:
     # time.sleep(100)
-    # dist.barrier()
+    dist.barrier()
     path = args.growmap
     grow_map = torch.load(path)
     tree_size = grow_map["size"]
     MAX_LEN = args.M + tree_size
     TARGET_MODEL_NAME = args.target
     DTYPE = torch.float16
-    # DEVICE = torch.device("cuda", global_rank)
-    DEVICE = torch.device("cuda", 0)
+    DEVICE = torch.device("cuda", global_rank)
+    # DEVICE = torch.device("cuda", 0)
     cg_list_target = [tree_size]
     target_model = LLMEngine(max_length=MAX_LEN, model_name=TARGET_MODEL_NAME, device=DEVICE, batch_size=BATCH_SIZE//2, dtype=torch.float16, global_group=target_global_group)
     target_model.initialize_cuda_graph(cg_list_target)
-    dist.barrier()
+    # dist.barrier()
     target_rank0 = args.target_group[0]
     draft_rank0 = args.draft_group[0]
     mini_batch_1_tree = None
@@ -157,7 +157,7 @@ if global_rank in args.target_group:
             elif control_tensor[0] == 5:
                 break
 elif global_rank in args.draft_group:
-    dist.barrier()
+    # dist.barrier()
     tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf", use_fast=False)
     tokenizer.pad_token = tokenizer.eos_token
     if args.dataset == 'wiki':
@@ -179,8 +179,8 @@ elif global_rank in args.draft_group:
     MAX_LEN = args.M + tree_size
     DRAFT_MODEL_NAME = args.model
     DTYPE = torch.float16
-    # DEVICE = torch.device("cuda", global_rank)
-    DEVICE = torch.device("cuda", 0)
+    DEVICE = torch.device("cuda", global_rank)
+    # DEVICE = torch.device("cuda", 0)
 
     sampling_callables = {}
     sample_gather_indices = {}
@@ -207,6 +207,7 @@ elif global_rank in args.draft_group:
 
     draft_model =  LLMEngine(max_length=MAX_LEN, model_name=DRAFT_MODEL_NAME, device=DEVICE, batch_size=BATCH_SIZE//2, dtype=torch.float16,  global_group=draft_global_group)
     draft_model.initialize_cuda_graph(cg_list_draft)
+    dist.barrier()
     dist.barrier()
     if args.Mode == "fast":
         simulation_fast(draft_model=draft_model, dataloader=dataloader, max_length=MAX_LEN, grow_map = grow_map, sampling_callables=sampling_callables, sample_gather_indices = sample_gather_indices, target_rank0 = target_rank0, draft_rank0 = draft_rank0)
