@@ -62,16 +62,16 @@ class PipeTree_Draft(BatchTree):
 
         self.make_inference_para_for_first_itr(prefix.size(1))
 
-        self.draft_model_engine.pp_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
-        self.draft_model_engine.pp_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
+        self.draft_model_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
+        self.draft_model_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
 
         self.draft_model_engine.forward(input_ids=self.tokens[:, :prefix.size(1)], 
                             storage_ids=self.prefill_storage_ids, 
                             position_ids=self.prefill_position_ids,
                             attention_mask=self.prefill_mask)
         
-        self.k_cache.copy_(self.draft_model_engine.pp_engine.llm.kv_cache.k_cache)
-        self.v_cache.copy_(self.draft_model_engine.pp_engine.llm.kv_cache.v_cache)
+        self.k_cache.copy_(self.draft_model_engine.llm.kv_cache.k_cache)
+        self.v_cache.copy_(self.draft_model_engine.llm.kv_cache.v_cache)
 
         control_tensor = torch.tensor([idx],device=self.device)
         dist.broadcast(control_tensor, draft_rank0)
@@ -157,8 +157,8 @@ class PipeTree_Draft(BatchTree):
         if benchmark:
             torch.cuda.synchronize()
             t1 = time.time()
-        self.draft_model_engine.pp_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
-        self.draft_model_engine.pp_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
+        self.draft_model_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
+        self.draft_model_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
         terminal = self.terminal
         target_accept_list = self.target_accept_list
         bonus_tokens = self.bonus_tokens
@@ -190,12 +190,12 @@ class PipeTree_Draft(BatchTree):
                 accept_list = batch_accept_list[batch_idx]
                 accept_list_kv = batch_accept_list_kv[batch_idx]
                 accept_length = len(accept_list)
-                self.draft_model_engine.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
+                self.draft_model_engine.llm.kv_cache.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
             self.tree_buffer[:, 0]= bonus_tokens.squeeze(1)
 
         if not terminal:
-            self.k_cache.copy_(self.draft_model_engine.pp_engine.llm.kv_cache.k_cache)
-            self.v_cache.copy_(self.draft_model_engine.pp_engine.llm.kv_cache.v_cache)
+            self.k_cache.copy_(self.draft_model_engine.llm.kv_cache.k_cache)
+            self.v_cache.copy_(self.draft_model_engine.llm.kv_cache.v_cache)
             if benchmark:
                 torch.cuda.synchronize()
                 t4 = time.time()
@@ -218,8 +218,8 @@ class PipeTree_Draft(BatchTree):
     
     def construct_grow_map(self, benchmark = False):
 
-        self.draft_model_engine.pp_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
-        self.draft_model_engine.pp_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
+        self.draft_model_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
+        self.draft_model_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
 
         self.prepare_for_next_iter()
         if benchmark:
@@ -233,8 +233,8 @@ class PipeTree_Draft(BatchTree):
                 else:
                         self.collective_grow_static(self.grow_map_roots_gpu[i], self.grow_map['branches'][i], grow_step=i)
         
-        self.k_cache.copy_(self.draft_model_engine.pp_engine.llm.kv_cache.k_cache)
-        self.v_cache.copy_(self.draft_model_engine.pp_engine.llm.kv_cache.v_cache)
+        self.k_cache.copy_(self.draft_model_engine.llm.kv_cache.k_cache)
+        self.v_cache.copy_(self.draft_model_engine.llm.kv_cache.v_cache)
         
         if benchmark:
             return sample_time, compute_time
@@ -274,7 +274,7 @@ class PipeTree_Draft(BatchTree):
 
 class PipeTree_Target(BatchTree):
     def __init__(self, 
-                 target_model_engine: LLM_Pipeline,
+                 target_model_engine: LLMEngine,
                  prefix :torch.LongTensor,
                  temperature :float = 0.6,
                  top_p: float = 0.9,
@@ -303,8 +303,8 @@ class PipeTree_Target(BatchTree):
         self.draft_rank0=draft_rank0
         self.target_rank0=target_rank0
 
-        self.k_cache = self.target_model_engine.pp_engine.llm.kv_cache.k_cache.clone()
-        self.v_cache = self.target_model_engine.pp_engine.llm.kv_cache.v_cache.clone()
+        self.k_cache = self.target_model_engine.llm.kv_cache.k_cache.clone()
+        self.v_cache = self.target_model_engine.llm.kv_cache.v_cache.clone()
         self.k_cache.zero_()
         self.v_cache.zero_()
 
@@ -325,8 +325,8 @@ class PipeTree_Target(BatchTree):
 
         self.make_inference_para_for_first_itr(prefix.size(1))
 
-        self.target_model_engine.pp_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
-        self.target_model_engine.pp_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
+        self.target_model_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
+        self.target_model_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
      
         output = self.target_model_engine.forward(input_ids=self.tokens[:, :prefix.size(1)], 
                             storage_ids=self.prefill_storage_ids, 
@@ -334,8 +334,8 @@ class PipeTree_Target(BatchTree):
                             attention_mask=self.prefill_mask,
                             )
         
-        self.k_cache.copy_(self.target_model_engine.pp_engine.llm.kv_cache.k_cache)
-        self.v_cache.copy_(self.target_model_engine.pp_engine.llm.kv_cache.v_cache)
+        self.k_cache.copy_(self.target_model_engine.llm.kv_cache.k_cache)
+        self.v_cache.copy_(self.target_model_engine.llm.kv_cache.v_cache)
         
         root_logits = output[:, -1:].clone()
         root_logits = get_sampling_logits(logits=root_logits, top_p=self.top_p, T=self.temperature, replicate=False)
@@ -365,8 +365,8 @@ class PipeTree_Target(BatchTree):
     def verify(self, benchmark = False):
         # Inference to get the target tokens
         dist.broadcast(self.tree_buffer, self.draft_rank0)
-        self.target_model_engine.pp_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
-        self.target_model_engine.pp_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
+        self.target_model_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
+        self.target_model_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
         if benchmark:
             torch.cuda.synchronize()
             t1 = time.time()
@@ -423,10 +423,10 @@ class PipeTree_Target(BatchTree):
                 accept_list = batch_accept_list[batch_idx]
                 accept_list_kv = batch_accept_list_kv[batch_idx]
                 accept_length = len(accept_list)
-                self.target_model_engine.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
+                self.target_model_engine.llm.kv_cache.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
         
-        self.k_cache.copy_(self.target_model_engine.pp_engine.llm.kv_cache.k_cache)
-        self.v_cache.copy_(self.target_model_engine.pp_engine.llm.kv_cache.v_cache)
+        self.k_cache.copy_(self.target_model_engine.llm.kv_cache.k_cache)
+        self.v_cache.copy_(self.target_model_engine.llm.kv_cache.v_cache)
 
         target_accept_list = torch.full((self.batch_size, self.draft_step),-1,device=self.device)
         for i in range(self.batch_size):
