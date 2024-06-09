@@ -2,12 +2,12 @@ import torch
 from torch.nn.functional import softmax
 from .Tree import BatchTree
 import time
-from Hesse.Engine_pipe.pipleline import LLM_Pipeline
+from Hesse.Engine.llm_pipe import LLMEngine
 from .utils import get_sampling_logits, ChildrenAccept
 import torch.distributed as dist
 class PipeTree_Draft(BatchTree):
     def __init__(self, 
-                 draft_model_engine: LLM_Pipeline,
+                 draft_model_engine: LLMEngine,
                  prefix :torch.LongTensor,
                  max_length = 256,
                  device :str = 'cpu',
@@ -39,8 +39,8 @@ class PipeTree_Draft(BatchTree):
         self.draft_rank0=draft_rank0
         self.idx = idx
 
-        self.k_cache = self.draft_model_engine.pp_engine.llm.kv_cache.k_cache.clone()
-        self.v_cache = self.draft_model_engine.pp_engine.llm.kv_cache.v_cache.clone()
+        self.k_cache = self.draft_model_engine.llm.kv_cache.k_cache.clone()
+        self.v_cache = self.draft_model_engine.llm.kv_cache.v_cache.clone()
         self.k_cache.zero_()
         self.v_cache.zero_()
 
