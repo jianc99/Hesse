@@ -78,6 +78,7 @@ def simulation_fast(draft_model: LLMEngine, dataloader: DataLoader, max_length=5
                     num_nodes[BATCH_SIZE//2:], terminate = batch_tree_2.verify()
                     break
                 batch_tree_1.construct_grow_map()
+
                 batch_tree_2.receive_result()
                 num_large_model_steps+=1
                 batch_tree_1.request_target()
@@ -99,6 +100,99 @@ def simulation_fast(draft_model: LLMEngine, dataloader: DataLoader, max_length=5
                     print(tokenizer.decode(batch_tree_1.tokens[i,:batch_tree_1.num_nodes[i]]))
                 for i in range(BATCH_SIZE//2):
                     print(tokenizer.decode(batch_tree_2.tokens[i,:batch_tree_2.num_nodes[i]]))
+                print("total time :{:.5f}s, latency :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / num_decoding_steps, num_decoding_steps, num_large_model_steps))
+            control_tensor = torch.tensor([4],device=DEVICE)
+            dist.broadcast(control_tensor,draft_rank0)
+            draft_model.llm.kv_cache.clear()
+            batch_tree_1 = None
+            batch_tree_2 = None
+            dist.barrier()
+            # time.sleep(100)
+        control_tensor = torch.tensor([5],device=DEVICE)
+        dist.broadcast(control_tensor,draft_rank0)
+    return num_decoding_steps / num_large_model_steps
+
+def simulation_benchmark(draft_model: LLMEngine, dataloader: DataLoader, max_length=512, grow_map=None, sampling_callables = None, sample_gather_indices = None, target_rank0=0, draft_rank0=0):
+    num_eval_steps = len(dataloader)
+    num_decoding_steps = 0
+    num_large_model_steps = 0
+    total_time = 0.0
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf", use_fast=False)
+    batch_tree_1 = None
+    batch_tree_2 = None
+    with torch.no_grad():
+        for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
+            input_ids = batch['input_ids'][..., :128]
+            labels = batch['labels'][..., :128]
+            terminate = False
+            if (labels[:, -1] == -100)._is_any_true(): terminate = True
+            mini_batch_1 = input_ids[:BATCH_SIZE//2]
+            mini_batch_2 = input_ids[BATCH_SIZE//2:]
+            batch_tree_1 = PipeTree_Draft(draft_model_engine=draft_model, prefix=mini_batch_1, max_length=max_length, device=DEVICE, batch_size=BATCH_SIZE//2, grow_map=grow_map, sampling_callables=sampling_callables, sample_gather_indices= sample_gather_indices, target_rank0=target_rank0, draft_rank0=draft_rank0, idx=0)
+            batch_tree_2 = PipeTree_Draft(draft_model_engine=draft_model, prefix=mini_batch_2, max_length=max_length, device=DEVICE, batch_size=BATCH_SIZE//2, grow_map=grow_map, sampling_callables=sampling_callables, sample_gather_indices= sample_gather_indices, target_rank0=target_rank0, draft_rank0=draft_rank0, idx=1)
+            num_nodes = torch.zeros(BATCH_SIZE,device=DEVICE).long()
+            
+            batch_tree_1.construct_grow_map()
+            batch_tree_1.request_target()
+            batch_tree_2.construct_grow_map()
+            longest=128
+            torch.cuda.synchronize()
+            t1 = time.time()
+            while longest < 256 and terminate == False:
+                batch_tree_1.receive_result()
+                num_large_model_steps+=1
+
+                torch.cuda.synchronize()
+                t3 = time.time()
+
+                batch_tree_2.request_target()
+
+                torch.cuda.synchronize()
+                t4 = time.time()
+
+                num_nodes[:BATCH_SIZE//2], terminate = batch_tree_1.verify()
+
+                torch.cuda.synchronize()
+                t5 = time.time()
+
+                longest = num_nodes.max()
+                if longest>= 256 or terminate == True:
+                    batch_tree_2.receive_result()
+                    num_large_model_steps+=1
+                    num_nodes[BATCH_SIZE//2:], terminate = batch_tree_2.verify()
+                    break
+                batch_tree_1.construct_grow_map()
+
+                torch.cuda.synchronize()
+                t6 = time.time()
+                
+                batch_tree_2.receive_result()
+                torch.cuda.synchronize()
+                t7 = time.time()
+                if global_rank == draft_rank0:
+                    print(t4-t3, t5-t4, t6-t5, t7-t6, t7-t3)
+    
+
+                num_large_model_steps+=1
+                batch_tree_1.request_target()
+                num_nodes[BATCH_SIZE//2:], terminate = batch_tree_2.verify()
+                longest = num_nodes.max()
+                if longest>= 256 or terminate == True:
+                    batch_tree_1.receive_result()
+                    num_large_model_steps+=1
+                    num_nodes[:BATCH_SIZE//2], terminate = batch_tree_1.verify()
+                    break
+                batch_tree_2.construct_grow_map()
+
+            torch.cuda.synchronize()
+            t2 = time.time()
+            num_decoding_steps += (num_nodes.sum() - input_ids.shape[1]*BATCH_SIZE)
+            total_time += (t2 - t1)
+            if dist.get_rank() == draft_rank0:
+                # for i in range(BATCH_SIZE//2):
+                #     print(tokenizer.decode(batch_tree_1.tokens[i,:batch_tree_1.num_nodes[i]]))
+                # for i in range(BATCH_SIZE//2):
+                #     print(tokenizer.decode(batch_tree_2.tokens[i,:batch_tree_2.num_nodes[i]]))
                 print("total time :{:.5f}s, latency :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / num_decoding_steps, num_decoding_steps, num_large_model_steps))
             control_tensor = torch.tensor([4],device=DEVICE)
             dist.broadcast(control_tensor,draft_rank0)
@@ -146,9 +240,19 @@ if global_rank in args.target_group:
                 mini_batch_2_tree = PipeTree_Target(device=DEVICE, target_model_engine=target_model,prefix=prefix, temperature=args.T, top_p=args.P,
                                         max_length=MAX_LEN, grow_map = grow_map, batch_size=BATCH_SIZE//2, target_rank0=target_rank0, draft_rank0=draft_rank0)
             elif control_tensor[0] == 2:
-                mini_batch_1_tree.verify()
+                if args.Mode == "benchmark":
+                    _, t1, t2, t3, t4, _ = mini_batch_1_tree.verify(benchmark=True)
+                    if global_rank == target_rank0:
+                        print(f"Receive time: {t1}; Inference time: {t2}; Verify loop: {t3}; Gather KV and send result: {t4}")
+                else:
+                    mini_batch_1_tree.verify()
             elif control_tensor[0] == 3:
-                mini_batch_2_tree.verify()
+                if args.Mode == "benchmark":
+                    _, t1, t2, t3, t4, _ = mini_batch_2_tree.verify(benchmark=True)
+                    if global_rank == target_rank0:
+                        print(f"Receive time: {t1}; Inference time: {t2}; Verify loop: {t3}; Gather KV and send result: {t4}")
+                else:
+                    mini_batch_2_tree.verify()
             elif control_tensor[0] == 4:
                 target_model.llm.kv_cache.clear()
                 mini_batch_1_tree = None
@@ -211,4 +315,6 @@ elif global_rank in args.draft_group:
     dist.barrier()
     if args.Mode == "fast":
         simulation_fast(draft_model=draft_model, dataloader=dataloader, max_length=MAX_LEN, grow_map = grow_map, sampling_callables=sampling_callables, sample_gather_indices = sample_gather_indices, target_rank0 = target_rank0, draft_rank0 = draft_rank0)
+    else:
+        simulation_benchmark(draft_model=draft_model, dataloader=dataloader, max_length=MAX_LEN, grow_map = grow_map, sampling_callables=sampling_callables, sample_gather_indices = sample_gather_indices, target_rank0 = target_rank0, draft_rank0 = draft_rank0)
 

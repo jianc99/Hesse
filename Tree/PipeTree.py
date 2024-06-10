@@ -81,7 +81,20 @@ class PipeTree_Draft(BatchTree):
         self.tree_buffer[:, 0] = root_tokens.squeeze(1)
         
         # self.prepare_for_next_iter()
-    
+    def gather_kv_incremental(self, indices: list[int], offset:int, batch_idx=None):
+        if batch_idx == None:
+            self.k_cache[..., offset:offset + len(indices), :] = self.k_cache[..., indices, :]
+            self.v_cache[..., offset:offset + len(indices), :] = self.v_cache[..., indices, :]
+
+            self.k_cache[..., offset + len(indices):, :] = 0.0
+            self.v_cache[..., offset + len(indices):, :] = 0.0
+        else:
+            self.k_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.k_cache[:, batch_idx, :, indices, :]
+            self.v_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.v_cache[:, batch_idx, :, indices, :]
+
+            self.k_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
+            self.v_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
+
     @torch.inference_mode()
     def collective_grow_static(self, idx_list, n_branch_list :list[int], benchmark=False, grow_step = None):
         
@@ -157,15 +170,12 @@ class PipeTree_Draft(BatchTree):
         if benchmark:
             torch.cuda.synchronize()
             t1 = time.time()
-        self.draft_model_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
-        self.draft_model_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
         terminal = self.terminal
         target_accept_list = self.target_accept_list
         bonus_tokens = self.bonus_tokens
         if benchmark:
             torch.cuda.synchronize()
             t2 = time.time()
-            return t2-t1
 # Gather accepted tokens
         terminal = terminal.item()==1
         batch_accept_list=[]
@@ -190,26 +200,14 @@ class PipeTree_Draft(BatchTree):
                 accept_list = batch_accept_list[batch_idx]
                 accept_list_kv = batch_accept_list_kv[batch_idx]
                 accept_length = len(accept_list)
-                self.draft_model_engine.llm.kv_cache.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
+                self.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
             self.tree_buffer[:, 0]= bonus_tokens.squeeze(1)
 
-        if not terminal:
-            self.k_cache.copy_(self.draft_model_engine.llm.kv_cache.k_cache)
-            self.v_cache.copy_(self.draft_model_engine.llm.kv_cache.v_cache)
-            if benchmark:
-                torch.cuda.synchronize()
-                t4 = time.time()
-                # self.prepare_for_next_iter()
-                return self.num_nodes, t2 - t1, t3-t2, t4 - t3, terminal
-            # self.prepare_for_next_iter()
-            return self.num_nodes, terminal
-            
-        else:
-             if benchmark:
-                torch.cuda.synchronize()
-                t4 = time.time()
-                return self.num_nodes, t2 - t1, t3-t2, t4 - t3, terminal
-             return self.num_nodes, terminal
+        if benchmark:
+            torch.cuda.synchronize()
+            t4 = time.time()
+            return self.num_nodes, t2 - t1, t3-t2, t4 - t3, terminal
+        return self.num_nodes, terminal
     
     
     def verbose(self):
@@ -345,6 +343,20 @@ class PipeTree_Target(BatchTree):
         
         self.prepare_for_next_iter()
     
+    def gather_kv_incremental(self, indices: list[int], offset:int, batch_idx=None):
+        if batch_idx == None:
+            self.k_cache[..., offset:offset + len(indices), :] = self.k_cache[..., indices, :]
+            self.v_cache[..., offset:offset + len(indices), :] = self.v_cache[..., indices, :]
+
+            self.k_cache[..., offset + len(indices):, :] = 0.0
+            self.v_cache[..., offset + len(indices):, :] = 0.0
+        else:
+            self.k_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.k_cache[:, batch_idx, :, indices, :]
+            self.v_cache[:, batch_idx, :, offset:offset + len(indices), :] = self.v_cache[:, batch_idx, :, indices, :]
+
+            self.k_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
+            self.v_cache[:, batch_idx, :, offset + len(indices):, :] = 0.0
+    
     @torch.inference_mode()
     def accept_step(self, parent_id :int, idx) ->ChildrenAccept:
         logits_id = parent_id
@@ -364,15 +376,20 @@ class PipeTree_Target(BatchTree):
     @torch.inference_mode()
     def verify(self, benchmark = False):
         # Inference to get the target tokens
+        if benchmark:
+            torch.cuda.synchronize()
+            t0 = time.time()
         dist.broadcast(self.tree_buffer, self.draft_rank0)
-        self.target_model_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
-        self.target_model_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
         if benchmark:
             torch.cuda.synchronize()
             t1 = time.time()
+        self.target_model_engine.llm.kv_cache.k_cache.copy_(self.k_cache)
+        self.target_model_engine.llm.kv_cache.v_cache.copy_(self.v_cache)
         target_model_outputs = self.target_model_engine.forward(input_ids = self.tree_buffer, 
                                     position_ids =self.position_ids, attention_mask = self.attn_mask,
                                     storage_ids=self.storage_ids)
+        self.k_cache.copy_(self.target_model_engine.llm.kv_cache.k_cache)
+        self.v_cache.copy_(self.target_model_engine.llm.kv_cache.v_cache)
         if benchmark:
             torch.cuda.synchronize()
             t2 = time.time()
@@ -404,9 +421,6 @@ class PipeTree_Target(BatchTree):
             batch_accept_list_kv.append([self.max_length-self.tree_size+pos for pos in accept_list])
             self.tokens[batch_idx, self.num_nodes[batch_idx]:self.num_nodes[batch_idx]+accept_length] = self.tree_buffer[batch_idx, accept_list]
             self.num_nodes[batch_idx]+= accept_length
-        if benchmark:
-            torch.cuda.synchronize()
-            t3 = time.time()
 # Check Bonus token
         bonus_tokens = torch.zeros((self.batch_size,1), device=self.device).long()
         if not terminal:
@@ -417,16 +431,16 @@ class PipeTree_Target(BatchTree):
                     terminal = True
                     break
                 bonus_tokens[batch_idx, 0]= bonus_token
+        if benchmark:
+            torch.cuda.synchronize()
+            t3 = time.time()
 # Gather KV Cache
         if not terminal:
             for batch_idx in range(self.batch_size):
                 accept_list = batch_accept_list[batch_idx]
                 accept_list_kv = batch_accept_list_kv[batch_idx]
                 accept_length = len(accept_list)
-                self.target_model_engine.llm.kv_cache.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
-        
-        self.k_cache.copy_(self.target_model_engine.llm.kv_cache.k_cache)
-        self.v_cache.copy_(self.target_model_engine.llm.kv_cache.v_cache)
+                self.gather_kv_incremental(accept_list_kv, self.num_nodes[batch_idx]-accept_length, batch_idx)
 
         target_accept_list = torch.full((self.batch_size, self.draft_step),-1,device=self.device)
         for i in range(self.batch_size):
@@ -447,7 +461,7 @@ class PipeTree_Target(BatchTree):
                 torch.cuda.synchronize()
                 t4 = time.time()
                 self.prepare_for_next_iter()
-                return self.num_nodes, t2 - t1, t3-t2, t4 - t3, terminal
+                return self.num_nodes, t1-t0, t2 - t1, t3-t2, t4 - t3, terminal
             self.prepare_for_next_iter()
             return self.num_nodes, terminal
             
@@ -455,7 +469,7 @@ class PipeTree_Target(BatchTree):
              if benchmark:
                 torch.cuda.synchronize()
                 t4 = time.time()
-                return self.num_nodes, t2 - t1, t3-t2, t4 - t3, terminal
+                return self.num_nodes,t1-t0, t2 - t1, t3-t2, t4 - t3, terminal
              return self.num_nodes, terminal 
     
     def verbose(self):

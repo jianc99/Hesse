@@ -68,8 +68,8 @@ for i, b in enumerate(valid_budget):
     for d, ac_len in enumerate(results[b]):
         if ac_len < 0:
             continue
-        # x = max((d) * draft_inference_time , target_time) / ac_len
-        x = (d) * draft_inference_time + target_time / ac_len
+        x = max((d) * draft_inference_time , target_time) / ac_len
+        # x = (d) * draft_inference_time + target_time / ac_len
         if x < dec_time:
             dec_time = x
             pairs = (b,d)
