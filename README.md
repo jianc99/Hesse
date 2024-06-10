@@ -17,6 +17,7 @@ pip install sentencepiece
 pip install datasets==2.16.1
 pip install accelerate==0.26.1
 pip install matplotlib
+pip install wandb
 ```
 
 ## Run Scripts
