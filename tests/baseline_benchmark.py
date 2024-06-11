@@ -29,6 +29,7 @@ global_group=initialized_dist_baseline()
 print("="*80)
 global_rank=dist.get_rank()
 if global_rank == 0:
+    print("="*80)
     print(args)
 setup_seed(args.seed)
 
